@@ -1,0 +1,204 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: RDS for  MySQL Create
+
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+      - Label:
+          default: 'Project Name Prefix'
+        Parameters:
+          - PJPrefix
+      - Label:
+          default: 'RDS Configuration'
+        Parameters:
+          - DBInstanceName
+          - MySQLMajorVersion
+          - MySQLMinorVersion
+          - DBInstanceClass
+          - DBInstanceStorageSize
+          - DBInstanceStorageType
+          - DBName
+          - DBMasterUserName
+          - DBPassword
+          - MultiAZ
+    ParameterLabels:
+      DBInstanceName:
+        default: 'DBInstanceName'
+      MySQLMajorVersion:
+        default: 'MySQLMajorVersion'
+      MySQLMinorVersion:
+        default: 'MySQLMinorVersion'
+      DBInstanceClass:
+        default: 'DBInstanceClass'
+      DBInstanceStorageSize:
+        default: 'DBInstanceStorageSize'
+      DBInstanceStorageType:
+        default: 'DBInstanceStorageType'
+      DBName:
+        default: 'DBName'
+      DBMasterUserName:
+        default: 'DBUserName'
+      DBPassword:
+        default: 'DBPassword'
+      MultiAZ:
+        default: 'MultiAZ'
+
+# ------------------------------------------------------------#
+# Input Parameters
+# ------------------------------------------------------------#
+Parameters:
+  PJPrefix:
+    Type: String
+    Default: 'Risetech-study'
+    Description: 'プロジェクト名プレフィックス（VPCテンプレートと同じ値）'
+
+  DBInstanceName:
+    Type: String
+    Default: 'risetech-rds-mysql'
+  MySQLMajorVersion:
+    Type: String
+    Default: '8.0'
+    AllowedValues: ['8.0', '5.7']
+  MySQLMinorVersion:
+    Type: String
+    Default: '41'
+  DBInstanceClass:
+    Type: String
+    Default: 'db.t4g.micro'
+    AllowedValues:
+      - 'db.t4g.micro'
+      - 'db.t3.micro'
+    Description: 'DB instance class (Graviton2 or x86 based)'
+  DBInstanceStorageSize:
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 1000
+  DBInstanceStorageType:
+    Type: String
+    Default: 'gp2'
+  DBName:
+    Type: String
+    Default: 'awsstudy'
+  DBMasterUserName:
+    Type: String
+    Default: 'root'
+    NoEcho: true
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: 'must begin with a letter and contain only alphanumeric characters.'
+  DBPassword:
+    NoEcho: true
+    Type: String
+    MinLength: 8
+    MaxLength: 41
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: 'must contain only alphanumeric characters.'
+  MultiAZ:
+    Default: 'false'
+    Type: String
+    AllowedValues: ['true', 'false']
+
+Resources:
+  # ------------------------------------------------------------#
+  #  DBInstance MySQL
+  # ------------------------------------------------------------#
+  DBInstance:
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      DBInstanceIdentifier: !Sub '${PJPrefix}-${DBInstanceName}'
+      Engine: MySQL
+      EngineVersion: !Sub '${MySQLMajorVersion}.${MySQLMinorVersion}'
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref DBInstanceStorageSize
+      StorageType: !Ref DBInstanceStorageType
+      DBName: !Ref DBName
+      MasterUsername: !Ref DBMasterUserName
+      MasterUserPassword: !Ref DBPassword
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      PubliclyAccessible: false
+      MultiAZ: !Ref MultiAZ
+      PreferredBackupWindow: '18:00-18:30'
+      PreferredMaintenanceWindow: 'sat:19:00-sat:19:30'
+      AutoMinorVersionUpgrade: false
+      DBParameterGroupName: !Ref DBParameterGroup
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      CopyTagsToSnapshot: true
+      BackupRetentionPeriod: 7
+      Tags:
+        - Key: 'Name'
+          Value: !Ref DBInstanceName
+    DeletionPolicy: 'Delete'
+
+  # ------------------------------------------------------------#
+  #  DBParameterGroup
+  # ------------------------------------------------------------#
+  DBParameterGroup:
+    Type: 'AWS::RDS::DBParameterGroup'
+    Properties:
+      Family: !Sub 'mysql${MySQLMajorVersion}'
+      Description: !Sub '${PJPrefix}-${DBInstanceName}-parm'
+
+  # ------------------------------------------------------------#
+  #  SecurityGroup for RDS (MySQL)
+  # ------------------------------------------------------------#
+  RDSSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      VpcId: { 'Fn::ImportValue': !Sub '${PJPrefix}-vpc' }
+      GroupName: !Sub '${PJPrefix}-${DBInstanceName}-sg'
+      GroupDescription: '-'
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${PJPrefix}-${DBInstanceName}-sg'
+      # Rule
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: { 'Fn::ImportValue': !Sub '${PJPrefix}-vpc-cidr' }
+          Description: 'MySQL access from EC2 only'
+
+  # ------------------------------------------------------------#
+  #  DBSubnetGroup
+  # ------------------------------------------------------------#
+  DBSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupName: !Sub '${PJPrefix}-${DBInstanceName}-subnet'
+      DBSubnetGroupDescription: '-'
+      SubnetIds:
+        - { 'Fn::ImportValue': !Sub '${PJPrefix}-private-subnet-a' }
+        - { 'Fn::ImportValue': !Sub '${PJPrefix}-private-subnet-c' }
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${PJPrefix}-${DBInstanceName}-subnet-group'
+
+# ------------------------------------------------------------#
+# Output Parameters
+# ------------------------------------------------------------#
+Outputs:
+  # DBInstance
+  DBInstanceID:
+    Description: 'RDS MySQL Instance ID'
+    Value: !Ref DBInstance
+    Export:
+      Name: !Sub '${PJPrefix}-${DBInstanceName}-id'
+
+  DBInstancePort:
+    Description: 'RDS MySQL Port'
+    Value: !GetAtt DBInstance.Endpoint.Port
+    Export:
+      Name: !Sub '${PJPrefix}-${DBInstanceName}-port'
+
+  DBInstanceEndpoint:
+    Value: !GetAtt DBInstance.Endpoint.Address
+    Export:
+      Name: !Sub '${PJPrefix}-${DBInstanceName}-endpoint'
+
+  DBName:
+    Value: !Ref DBName
+    Export:
+      Name: !Sub '${PJPrefix}-${DBInstanceName}-dbname'

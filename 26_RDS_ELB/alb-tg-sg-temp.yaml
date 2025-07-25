@@ -25,7 +25,6 @@ Parameters:
     Type: String
     Default: 'Risetech-study'
 
-  # ALB
   ALBName:
     Type: String
     Default: 'raisetech-study-alb'

@@ -70,12 +70,12 @@ Resources:
     Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
     Properties:
       VpcId: { 'Fn::ImportValue': !Sub '${PJPrefix}-vpc' }
-      Name: !Sub '${PJPrefix}-tg'
+      Name: !Sub '${PJPrefix}-tg-v2'
       Protocol: HTTP
-      Port: 80
+      Port: 8080
       HealthCheckProtocol: HTTP
       HealthCheckPath: '/'
-      HealthCheckPort: 'traffic-port'
+      HealthCheckPort: 8080
       HealthyThresholdCount: 5
       UnhealthyThresholdCount: 2
       HealthCheckTimeoutSeconds: 5

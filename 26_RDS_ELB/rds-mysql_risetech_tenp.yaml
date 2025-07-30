@@ -131,6 +131,7 @@ Resources:
         - Key: 'Name'
           Value: !Ref DBInstanceName
     DeletionPolicy: 'Delete'
+    UpdateReplacePolicy: 'Delete'
 
   # ------------------------------------------------------------#
   #  DBParameterGroup
@@ -158,7 +159,8 @@ Resources:
         - IpProtocol: tcp
           FromPort: 3306
           ToPort: 3306
-          CidrIp: { 'Fn::ImportValue': !Sub '${PJPrefix}-vpc-cidr' }
+          SourceSecurityGroupId:
+            Fn::ImportValue: !Sub '${PJPrefix}-EC2-SecurityGroup'
           Description: 'MySQL access from EC2 only'
 
   # ------------------------------------------------------------#

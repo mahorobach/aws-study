@@ -1,0 +1,150 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ALB, Target Group, and SeqrityGroup Create'
+
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+      - Label:
+          default: 'Project Name Prefix'
+        Parameters:
+          - PJPrefix
+      - Label:
+          default: 'ALB Configuration'
+        Parameters:
+          - ALBName
+
+    ParameterLabels:
+      ALBName:
+        default: 'ALBName'
+
+# ------------------------------------------------------------#
+# Input Parameters
+# ------------------------------------------------------------#
+Parameters:
+  PJPrefix:
+    Type: String
+    Default: 'Risetech-study'
+
+  ALBName:
+    Type: String
+    Default: 'raisetech-study-alb'
+
+  ALBScheme:
+    Type: String
+    Default: 'internet-facing'
+    AllowedValues:
+      - 'internet-facing'
+      - 'internal'
+
+  ALBIpAddressType:
+    Type: String
+    Default: 'ipv4'
+    AllowedValues:
+      - 'ipv4'
+      - 'dualstack'
+
+Resources:
+  # ------------------------------------------------------------#
+  #  SecurityGroup for ALB
+  # ------------------------------------------------------------#
+  ALBSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      VpcId: { 'Fn::ImportValue': !Sub '${PJPrefix}-vpc' }
+      GroupName: !Sub '${PJPrefix}-alb-sg'
+      GroupDescription: 'Security group for Application Load Balancer'
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${PJPrefix}-alb-sg'
+      # Rule
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: '0.0.0.0/0'
+
+  # ------------------------------------------------------------#
+  #  Target Group
+  # ------------------------------------------------------------#
+  TargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      VpcId: { 'Fn::ImportValue': !Sub '${PJPrefix}-vpc' }
+      Name: !Sub '${PJPrefix}-tg-v2'
+      Protocol: HTTP
+      Port: 8080
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: '/'
+      HealthCheckPort: 8080
+      HealthyThresholdCount: 5
+      UnhealthyThresholdCount: 2
+      HealthCheckTimeoutSeconds: 5
+      HealthCheckIntervalSeconds: 30
+      Matcher:
+        HttpCode: 200,300,301
+      Tags:
+        - Key: Name
+          Value: !Sub '${PJPrefix}-tg'
+      TargetGroupAttributes:
+        - Key: 'deregistration_delay.timeout_seconds'
+          Value: 300
+        - Key: 'stickiness.enabled'
+          Value: false
+        - Key: 'stickiness.type'
+          Value: lb_cookie
+        - Key: 'stickiness.lb_cookie.duration_seconds'
+          Value: 86400
+      Targets:
+        - Id: { 'Fn::ImportValue': !Sub '${PJPrefix}-ec2-instance-id' }
+          Port: 8080
+
+  # ------------------------------------------------------------#
+  #  Application Load Balancer
+  # ------------------------------------------------------------#
+  ApplicationLoadBalancer:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Name: !Sub '${PJPrefix}-alb'
+      Type: application
+      Scheme: !Ref ALBScheme
+      IpAddressType: !Ref ALBIpAddressType
+      Subnets:
+        - { 'Fn::ImportValue': !Sub '${PJPrefix}-public-subnet-a' }
+        - { 'Fn::ImportValue': !Sub '${PJPrefix}-public-subnet-c' }
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${PJPrefix}-${ALBName}'
+  # ------------------------------------------------------------#
+  #  ALB Listener
+  # ------------------------------------------------------------#
+  ALBListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref TargetGroup
+          Type: forward
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+# ------------------------------------------------------------#
+# Output Parameters
+# ------------------------------------------------------------#
+Outputs:
+  # InternetALB
+  ALBDNSName:
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+    Export:
+      Name: !Sub '${PJPrefix}-alb-dnsname'
+
+  ALBSecurityGroupId:
+    Value: !Ref ALBSecurityGroup
+    Export:
+      Name: !Sub '${PJPrefix}-alb-sg-id'
+
+  TargetGroupArn:
+    Value: !Ref TargetGroup
+    Export:
+      Name: !Sub '${PJPrefix}-tg-arn'

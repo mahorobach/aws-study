@@ -1,0 +1,227 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS-Study-27'
+
+Resources:
+  # VPC
+  Task27VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.1.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: aws-study-27-vpc
+
+  #Subnet(2つともパブリックIPを自動付与可能にする)
+  SubnetAZ1a:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Task27VPC
+      CidrBlock: 10.1.0.0/24
+      AvailabilityZone: ap-northeast-1a
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: aws-study-27-subnet1a
+
+  SubnetAZ1c:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Task27VPC
+      CidrBlock: 10.1.1.0/24
+      AvailabilityZone: ap-northeast-1c
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: aws-study-27-subnet1c
+
+  #InternetGateway
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: aws-study-27-gw
+
+  # VPCGatewayAttachment
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Task27VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # RouteTable
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Task27VPC
+      Tags:
+        - Key: Name
+          Value: aws-study-27-route
+
+  RouteInternet:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  #各サブネットとルートテーブルを関連付け（パブリックネット化）
+  RouteLocal:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTable
+      SubnetId: !Ref SubnetAZ1a
+
+  #ALB や　RDS　を配置する　SubnetAZ1c もインターネットアクセスできるように関連付け
+  RouteLocal2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTable
+      SubnetId: !Ref SubnetAZ1c
+
+  # SecurityGroup
+  SecurityGroupEC2:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: AWS Study 27 EC2
+      VpcId: !Ref Task27VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  SecurityGroupRDS:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: AWS Study 27 RDS
+      VpcId: !Ref Task27VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref SecurityGroupEC2
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: aws-study-27-securityGroup-rds
+
+  #EC2 (Amazon Linux)
+  Task27EC2:
+    Type: AWS::EC2::Instance
+    Properties:
+      #Amason Linux 2023の最新AMIをSSMパラメータストアから取得
+      ImageId: !Sub 'resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64'
+      KeyName: akaokey
+      InstanceType: t2.micro
+      SubnetId: !Ref SubnetAZ1a
+      DisableApiTermination: false
+      SecurityGroupIds:
+        - !Ref SecurityGroupEC2
+      Tags:
+        - Key: Name
+          Value: aws-study-27-ec2
+
+  # RDS
+  Task27RDS:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: 20
+      AllowMajorVersionUpgrade: false
+      AutoMinorVersionUpgrade: true
+      DBInstanceClass: db.t4g.micro
+      Port: 3306
+      StorageType: gp2
+      BackupRetentionPeriod: 1
+      MasterUsername: root
+      MasterUserPassword: rootroot
+      PreferredBackupWindow: 15:00-16:00
+      PreferredMaintenanceWindow: sun:18:00-sun:19:00
+      DBName: awsstudy
+      Engine: mysql
+      EngineVersion: 8.0.41
+      LicenseModel: general-public-license
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref SecurityGroupRDS
+      Tags:
+        - Key: Name
+          Value: aws-study-27-rds
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Created from the RDS Mnagement Console
+      SubnetIds:
+        - !Ref SubnetAZ1a
+        - !Ref SubnetAZ1c
+
+  #ELB
+  ELB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: aws-study-27-elb
+      SecurityGroups:
+        - !Ref SecurityGroupEC2
+      Subnets:
+        - !Ref SubnetAZ1a
+        - !Ref SubnetAZ1c
+      Tags:
+        - Key: Name
+          Value: aws-study-27-elb
+
+  ELBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: aws-study-27-elb-target-group
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref Task27VPC
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      HealthCheckTimeoutSeconds: 5
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: '/'
+      HealthCheckPort: 'traffic-port'
+      HealthCheckIntervalSeconds: 10
+      Matcher:
+        HttpCode: 200
+      Tags:
+        - Key: Name
+          Value: aws-study-27-elb-target-group
+      Targets:
+        - Id: !Ref Task27EC2
+          Port: 8080
+
+  ELBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ELB
+      DefaultActions:
+        - TargetGroupArn: !Ref ELBTargetGroup
+          Type: forward
+      Port: 80
+      Protocol: HTTP
